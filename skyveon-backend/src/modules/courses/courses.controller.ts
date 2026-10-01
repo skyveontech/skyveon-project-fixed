@@ -4,6 +4,7 @@ import * as coursesService from "./courses.service";
 import { logActivity } from "../../lib/activityLog";
 import { ApiError } from "../../lib/apiError";
 import { prisma } from "../../lib/prisma";
+import { getStorage, makeStorageKey } from "../../lib/storage";
 
 // --- Admin: courses ------------------------------------------------------
 
@@ -21,6 +22,7 @@ const createCourseSchema = z.object({
   title: z.string().min(1),
   description: z.string().optional(),
   department: z.string().optional(),
+  imageUrl: z.string().optional(),
 });
 
 export async function create(req: Request, res: Response) {
@@ -34,6 +36,7 @@ const updateCourseSchema = z.object({
   title: z.string().min(1).optional(),
   description: z.string().optional(),
   department: z.string().optional(),
+  imageUrl: z.string().nullable().optional(),
 });
 
 export async function update(req: Request, res: Response) {
@@ -57,6 +60,8 @@ const addLessonSchema = z.object({
   linkUrl: z.string().url().optional(),
   durationSeconds: z.number().int().positive().optional(),
   assignmentPrompt: z.string().optional(),
+  moduleId: z.string().nullable().optional(),
+  position: z.number().int().min(0).optional(),
 });
 
 export async function addLesson(req: Request, res: Response) {
@@ -77,6 +82,7 @@ const updateLessonSchema = z.object({
   linkUrl: z.string().url().optional(),
   durationSeconds: z.number().int().positive().optional(),
   assignmentPrompt: z.string().optional(),
+  moduleId: z.string().nullable().optional(),
 });
 
 export async function updateLesson(req: Request, res: Response) {
@@ -169,4 +175,59 @@ export async function downloadSubmissionFile(req: Request, res: Response) {
   res.setHeader("Content-Type", mime);
   res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(fileName)}"`);
   res.send(buffer);
+}
+
+export async function uploadCoverImage(req: Request, res: Response) {
+  if (!req.file) throw ApiError.badRequest("No file uploaded");
+  if (!req.file.mimetype.startsWith("image/")) {
+    throw ApiError.badRequest("Only image files are allowed.");
+  }
+  const key = makeStorageKey(req.file.originalname);
+  await getStorage().save(`courses/${key}`, req.file.buffer, req.file.mimetype);
+  await logActivity({ userId: req.user!.id, action: "course.upload_image" });
+  res.status(201).json({ url: `/api/courses/image/${key}` });
+}
+
+export async function serveCourseImage(req: Request, res: Response) {
+  const key = `courses/${req.params[0]}`;
+  try {
+    const buffer = await getStorage().read(key);
+    const ext = key.split(".").pop()?.toLowerCase();
+    const mime =
+      ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : ext === "gif" ? "image/gif" : "image/jpeg";
+    res.setHeader("Content-Type", mime);
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    res.send(buffer);
+  } catch {
+    throw ApiError.notFound("Image not found");
+  }
+}
+
+// --- Admin: modules -----------------------------------------------------------
+
+const moduleSchema = z.object({ title: z.string().min(1) });
+const reorderModulesSchema = z.object({ moduleIds: z.array(z.string()).min(1) });
+
+export async function createModule(req: Request, res: Response) {
+  const { title } = moduleSchema.parse(req.body);
+  const mod = await coursesService.createModule(req.params.courseId, { title });
+  await logActivity({ userId: req.user!.id, action: "module.create", metadata: { moduleId: mod.id } });
+  res.status(201).json({ module: mod });
+}
+
+export async function updateModule(req: Request, res: Response) {
+  const { title } = moduleSchema.parse(req.body);
+  const mod = await coursesService.updateModule(req.params.moduleId, { title });
+  res.json({ module: mod });
+}
+
+export async function reorderModules(req: Request, res: Response) {
+  const { moduleIds } = reorderModulesSchema.parse(req.body);
+  await coursesService.reorderModules(req.params.courseId, moduleIds);
+  res.status(204).send();
+}
+
+export async function removeModule(req: Request, res: Response) {
+  await coursesService.softDeleteModule(req.params.moduleId);
+  res.status(204).send();
 }

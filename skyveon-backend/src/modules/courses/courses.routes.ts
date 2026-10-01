@@ -8,6 +8,7 @@ export const coursesRouter = Router();
 
 // Public — no auth. Must come first, before the blanket requireAuth below.
 coursesRouter.get("/public", asyncHandler(controller.listPublic));
+coursesRouter.get(/^\/image\/(.+)/, asyncHandler(controller.serveCourseImage));
 
 coursesRouter.use(requireAuth);
 
@@ -17,6 +18,12 @@ coursesRouter.get("/mine/:courseId", asyncHandler(controller.getMine));
 
 // Admin-only from here down
 coursesRouter.use(requireRole("ADMIN"), requirePermission("MANAGE_COURSES"));
+
+coursesRouter.post(
+  "/upload-cover-image",
+  upload.single("file"),
+  asyncHandler(controller.uploadCoverImage)
+);
 
 coursesRouter.get("/", asyncHandler(controller.listAdmin));
 coursesRouter.post("/", asyncHandler(controller.create));
@@ -40,3 +47,9 @@ coursesRouter.post("/lessons/:lessonId/retry-conversion", asyncHandler(controlle
 coursesRouter.get("/lessons/:lessonId/submissions", asyncHandler(controller.listSubmissions));
 coursesRouter.patch("/submissions/:submissionId/review", asyncHandler(controller.reviewSubmission));
 coursesRouter.get("/submissions/:submissionId/file", asyncHandler(controller.downloadSubmissionFile));
+
+// Module CRUD — group lessons into named sections within a course
+coursesRouter.post("/:courseId/modules", asyncHandler(controller.createModule));
+coursesRouter.patch("/:courseId/modules/reorder", asyncHandler(controller.reorderModules));
+coursesRouter.patch("/modules/:moduleId", asyncHandler(controller.updateModule));
+coursesRouter.delete("/modules/:moduleId", asyncHandler(controller.removeModule));
